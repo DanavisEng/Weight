@@ -209,8 +209,8 @@ with tab2:
                 st.rerun()
                 
     with tab3:
-    st.title("📊 Report Management")
-    if not df_all.empty:
+        st.title("📊 Report Management")
+        if not df_all.empty:
         report_type = st.radio("Type:", ["Daily Report", "Weekly Report"], horizontal=True, key="rep_final_fixed")
         st.divider()
 
