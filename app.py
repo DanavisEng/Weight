@@ -76,19 +76,16 @@ create_db()
 operators = ["V.Palec", "J.Jonaitis", "P.Petraitis", "S.Beržas"]
 customers = ["L-L", "L-R"]
 
+# Patobulinta spalvinimo funkcija
 def apply_custom_styling(row):
     styles = [''] * len(row)
-    if row.get('Found_in_Excel', False): 
-        styles = ['background-color: #d4edda'] * len(row) # Green
+    if row.get('Found_in_Excel') == True: 
+        styles = ['background-color: #d4edda'] * len(row) # Žalia
     elif row.get('is_manual') == 1: 
-        styles = ['background-color: #d1ecf1'] * len(row) # Blue
+        styles = ['background-color: #d1ecf1'] * len(row) # Mėlyna
     return styles
 
 st.title("🌲 Danavis Engineering Logistics")
-
-# Užkrauname duomenis iškart, kad būtų prieinami visiems skydeliams
-with sqlite3.connect('danavis_system.db') as conn:
-    df_all = pd.read_sql_query("SELECT * FROM weighings ORDER BY id DESC", conn)
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -140,119 +137,106 @@ with st.sidebar:
             cursor.execute("UPDATE weighings SET full_code=? WHERE id=?", (generate_full_code(cust_sim, samp_sim)+f"/{new_id}", new_id))
         st.rerun()
 
+# Užkrauname duomenis
+with sqlite3.connect('danavis_system.db') as conn:
+    df_all = pd.read_sql_query("SELECT * FROM weighings ORDER BY id DESC", conn)
+
 # --- TABS ---
 tab1, tab2, tab3 = st.tabs(["📊 Terminal", "🛠️ Edit / Archive", "📈 Reports"])
 
 with tab1:
     st.subheader("🏗️ Active (On Scales)")
-    active_df = df_all[df_all['status'] == 'IN_PROGRESS']
-    if not active_df.empty:
-        cols = st.columns(3)
-        for idx, (_, row) in enumerate(active_df.iterrows()):
-            with cols[idx % 3]:
-                is_man = row['is_manual'] == 1
-                container_title = f"🚛 {row['plate_number']}" + (" (EDITED)" if is_man else "")
-                with st.container(border=True):
-                    st.markdown(f"### {container_title}")
-                    st.caption(f"Code: {row['full_code']}")
-                    edit_g = st.number_input("Weight IN", value=float(row['gross']), format="%.3f", key=f"g_{row['id']}")
-                    edit_out = st.number_input("Weight OUT", value=0.0, format="%.3f", key=f"o_{row['id']}")
-                    if st.button("FINISH WEIGHING", key=f"btn_{row['id']}", use_container_width=True):
-                        neto = abs(edit_g - edit_out)
-                        with sqlite3.connect('danavis_system.db') as conn:
-                            conn.execute("UPDATE weighings SET gross=?, tare=?, net=?, status='COMPLETED', sampling_done='Yes' WHERE id=?", (edit_g, edit_out, neto, row['id']))
-                        st.rerun()
+    if not df_all.empty:
+        active_df = df_all[df_all['status'] == 'IN_PROGRESS']
+        if not active_df.empty:
+            cols = st.columns(3)
+            for idx, (_, row) in enumerate(active_df.iterrows()):
+                with cols[idx % 3]:
+                    with st.container(border=True):
+                        st.markdown(f"### 🚛 {row['plate_number']}")
+                        st.caption(f"Code: {row['full_code']}")
+                        edit_g = st.number_input("Weight IN", value=float(row['gross']), format="%.3f", key=f"g_{row['id']}")
+                        edit_out = st.number_input("Weight OUT", value=0.0, format="%.3f", key=f"o_{row['id']}")
+                        if st.button("FINISH WEIGHING", key=f"btn_{row['id']}", use_container_width=True):
+                            neto = abs(edit_g - edit_out)
+                            with sqlite3.connect('danavis_system.db') as conn:
+                                conn.execute("UPDATE weighings SET gross=?, tare=?, net=?, status='COMPLETED', sampling_done='Yes' WHERE id=?", (edit_g, edit_out, neto, row['id']))
+                            st.rerun()
 
     st.divider()
     st.subheader("📋 Recent Weighing Table")
-    hist_df = df_all[df_all['status'] == 'COMPLETED']
+    hist_df = df_all[df_all['status'] == 'COMPLETED'].copy()
     if not hist_df.empty:
-        st.caption("🔵 Blue highlight: Manually edited record")
         st.dataframe(hist_df.style.apply(apply_custom_styling, axis=1), use_container_width=True, hide_index=True)
-        sel_print = st.selectbox("Select ID for Label", hist_df['id'].tolist())
-        if sel_print:
-            r = hist_df[hist_df['id'] == sel_print].iloc[0]
-            st.download_button(f"Download {r['plate_number']} Label", generate_sticker(r), f"label_{r['id']}.pdf")
 
 with tab2:
     st.subheader("🛠️ Manual Edit")
     if not df_all.empty:
-        sel_id = st.selectbox("ID to Edit", df_all['id'].tolist(), key="edit_id_sel")
+        sel_id = st.selectbox("ID to Edit", df_all['id'].tolist())
         curr = df_all[df_all['id'] == sel_id].iloc[0]
-        with st.form("edit_form_final"):
+        with st.form("edit_form"):
             c1, c2 = st.columns(2)
             with c1:
                 u_cust = st.selectbox("Customer", customers, index=customers.index(curr['customer']) if curr['customer'] in customers else 0)
-                u_samp = st.text_input("Sample No", curr['sample_number'])
                 u_plate = st.text_input("Plate", curr['plate_number'])
             with c2:
                 u_in = st.number_input("Weight In", float(curr['gross']), format="%.3f")
                 u_out = st.number_input("Weight Out", float(curr['tare']), format="%.3f")
-                u_vol = st.number_input("Volume", int(curr['volume']))
-            
             if st.form_submit_button("Save Changes"):
-                new_code = f"{generate_full_code(u_cust, u_samp)}/{sel_id}"
                 with sqlite3.connect('danavis_system.db') as conn:
-                    conn.execute("""UPDATE weighings SET customer=?, sample_number=?, plate_number=?, gross=?, tare=?, net=?, volume=?, full_code=?, is_manual=1 WHERE id=?""",
-                                 (u_cust, u_samp, u_plate, u_in, u_out, abs(u_in-u_out), u_vol, new_code, sel_id))
-                st.success("Changes saved!")
+                    conn.execute("UPDATE weighings SET customer=?, plate_number=?, gross=?, tare=?, net=?, is_manual=1 WHERE id=?", 
+                                 (u_cust, u_plate, u_in, u_out, abs(u_in-u_out), sel_id))
                 st.rerun()
 
 with tab3:
     st.title("📊 Report Management")
     if not df_all.empty:
-        report_type = st.radio("Type:", ["Daily Report", "Weekly Report"], horizontal=True, key="rep_radio")
-        st.divider()
-
+        report_type = st.radio("Type:", ["Daily Report", "Weekly Report"], horizontal=True)
+        
         df_reports = df_all.copy()
         df_reports['timestamp_dt'] = pd.to_datetime(df_reports['timestamp'], errors='coerce')
-        
-        if report_type == "Daily Report":
-            report_date = st.date_input("Date", datetime.now(), key="daily_date_pick")
-            daily_filtered = df_reports[(df_reports['status'] == 'COMPLETED') & (df_reports['timestamp_dt'].dt.date == report_date)].copy()
-            
-            if daily_filtered.empty:
-                st.info("No records found.")
-            else:
-                raw_c = daily_filtered['customer'].fillna("Undefined").unique().tolist()
-                sel_c = st.selectbox("Customer:", ["All Customers"] + sorted([str(c) for c in raw_c]))
-                final_df = daily_filtered if sel_c == "All Customers" else daily_filtered[daily_filtered['customer'] == sel_c]
-                
-                st.dataframe(final_df.style.apply(apply_custom_styling, axis=1), use_container_width=True, hide_index=True)
-                
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    final_df.drop(columns=['timestamp_dt'], errors='ignore').to_excel(writer, index=False)
-                st.download_button("📥 Download Excel", output.getvalue(), f"Daily_{report_date}.xlsx")
 
-        else: # WEEKLY
+        if report_type == "Daily Report":
+            report_date = st.date_input("Select Date", datetime.now())
+            final_df = df_reports[(df_reports['status'] == 'COMPLETED') & (df_reports['timestamp_dt'].dt.date == report_date)].copy()
+            st.dataframe(final_df.style.apply(apply_custom_styling, axis=1), use_container_width=True)
+        
+        else: # WEEKLY REPORT (SU EXCEL IMPORTU)
             w_col1, w_col2 = st.columns(2)
             with w_col1:
-                week_date = st.date_input("Week date:", datetime.now(), key="weekly_date_pick")
+                week_date = st.date_input("Select day in week:", datetime.now())
                 year, week, _ = week_date.isocalendar()
             with w_col2:
-                uploaded_file = st.file_uploader("📥 Attach Excel to Verify", type=['xlsx'])
+                # Štai čia yra tavo ieškotas Excel importas
+                uploaded_file = st.file_uploader("📥 Attach Excel to Verify (must have 'Full code' column)", type=['xlsx'])
             
             weekly_data = df_reports[(df_reports['status'] == 'COMPLETED') & 
-                                     (df_reports['timestamp_dt'].dt.isocalendar().week == week) & 
-                                     (df_reports['timestamp_dt'].dt.isocalendar().year == year)].copy()
+                                     (df_reports['timestamp_dt'].dt.isocalendar().week == week)].copy()
             
-            if weekly_data.empty:
-                st.warning("No data found.")
-            else:
+            if not weekly_data.empty:
+                # Pridedame stulpelį žymėjimui
                 weekly_data['Found_in_Excel'] = False
-                if uploaded_file:
-                    extra = pd.read_excel(uploaded_file)
-                    if 'Full code' in extra.columns:
-                        weekly_data['full_code'] = weekly_data['full_code'].astype(str).str.strip()
-                        extra['Full code'] = extra['Full code'].astype(str).str.strip()
-                        weekly_data['Found_in_Excel'] = weekly_data['full_code'].isin(extra['Full code'].unique())
-                        st.success("Excel match processed.")
                 
-                st.caption("🟢 Green: Match | 🔵 Blue: Edited")
+                if uploaded_file:
+                    try:
+                        extra_df = pd.read_excel(uploaded_file)
+                        if 'Full code' in extra_df.columns:
+                            # Lyginame kodus
+                            valid_codes = extra_df['Full code'].astype(str).str.strip().unique()
+                            weekly_data['full_code_clean'] = weekly_data['full_code'].astype(str).str.strip()
+                            weekly_data['Found_in_Excel'] = weekly_data['full_code_clean'].isin(valid_codes)
+                            st.success(f"Matched {weekly_data['Found_in_Excel'].sum()} records with Excel!")
+                        else:
+                            st.error("Excel file must contain 'Full code' column.")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+                st.caption("🟢 Green: Matched with Excel | 🔵 Blue: Manual Edit")
+                # Atvaizduojame su spalvomis
                 st.dataframe(weekly_data.style.apply(apply_custom_styling, axis=1), use_container_width=True, hide_index=True)
                 
-                wk_out = BytesIO()
-                with pd.ExcelWriter(wk_out, engine='xlsxwriter') as writer:
-                    weekly_data.drop(columns=['timestamp_dt', 'Found_in_Excel'], errors='ignore').to_excel(writer, index=False)
-                st.download_button("📥 Download Weekly Excel", wk_out.getvalue(), f"Week_{week}.xlsx")
+                # Excel parsisiuntimas
+                out = BytesIO()
+                with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
+                    weekly_data.drop(columns=['timestamp_dt', 'Found_in_Excel', 'full_code_clean'], errors='ignore').to_excel(writer, index=False)
+                st.download_button("📥 Download Weekly Report", out.getvalue(), f"Week_{week}.xlsx")
