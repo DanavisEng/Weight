@@ -207,6 +207,7 @@ with tab2:
                                  (u_cust, u_samp, u_plate, u_in, u_out, abs(u_in-u_out), u_vol, new_code, sel_id))
                 st.success("Changes saved!")
                 st.rerun()
+                
  with tab3:
     st.title("📊 Report Management")
     if not df_all.empty:
