@@ -3,4 +3,4 @@ pandas
 reportlab
 xlsxwriter
 qrcode
-image
+Pillow
