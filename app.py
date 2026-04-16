@@ -207,35 +207,82 @@ with tab2:
                                  (u_cust, u_samp, u_plate, u_in, u_out, abs(u_in-u_out), u_vol, new_code, sel_id))
                 st.success("Changes saved!")
                 st.rerun()
-
-with tab3:
+                
+    with tab3:
     st.title("📊 Report Management")
     if not df_all.empty:
-        report_type = st.radio("Type:", ["Daily Report", "Weekly Report"], horizontal=True)
+        report_type = st.radio("Type:", ["Daily Report", "Weekly Report"], horizontal=True, key="rep_final_fixed")
+        st.divider()
+
         df_reports = df_all.copy()
+        # Sutvarkome datas, kad būtų galima filtruoti
         df_reports['timestamp_dt'] = pd.to_datetime(df_reports['timestamp'], errors='coerce')
         
         if report_type == "Daily Report":
-            report_date = st.date_input("Date", datetime.now())
-            daily_filtered = df_reports[(df_reports['status'] == 'COMPLETED') & (df_reports['timestamp_dt'].dt.date == report_date)].copy()
-            if not daily_filtered.empty:
-                st.dataframe(daily_filtered.style.apply(apply_custom_styling, axis=1), use_container_width=True)
+            st.subheader("📅 Daily Summary")
+            report_date = st.date_input("Date", datetime.now(), key="d_d_f_fixed")
+            daily_filtered = df_reports[(df_reports['status'] == 'COMPLETED') & 
+                                        (df_reports['timestamp_dt'].dt.date == report_date)].copy()
+            
+            if daily_filtered.empty:
+                st.info("No records found for this day.")
+            else:
+                raw_c = daily_filtered['customer'].fillna("Undefined").unique().tolist()
+                sel_c = st.selectbox("Filter by Customer:", ["All Customers"] + sorted([str(c) for c in raw_c]), key="d_c_f_fixed")
+                
+                final_df = daily_filtered if sel_c == "All Customers" else daily_filtered[daily_filtered['customer'] == sel_c]
+                
+                st.caption("🔵 Blue: Manual edit")
+                st.dataframe(final_df.style.apply(apply_custom_styling, axis=1), use_container_width=True, hide_index=True)
+                
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    daily_filtered.drop(columns=['timestamp_dt'], errors='ignore').to_excel(writer, index=False)
-                st.download_button("📥 Download Excel", output.getvalue(), f"Daily_{report_date}.xlsx")
-            else:
-                st.info("No records for this day.")
-        
-        else: # WEEKLY
-            week_date = st.date_input("Select day in week:", datetime.now())
-            year, week, _ = week_date.isocalendar()
+                    final_df.drop(columns=['timestamp_dt'], errors='ignore').to_excel(writer, index=False)
+                st.download_button("📥 Download Excel", output.getvalue(), f"Daily_Report_{report_date}.xlsx", key="dl_d_fixed")
+
+        else: # WEEKLY REPORT SU EXCEL IMPORTU
+            st.subheader("📅 Weekly Summary & Verification")
+            w_col1, w_col2 = st.columns(2)
+            with w_col1:
+                week_date = st.date_input("Select day in week:", datetime.now(), key="w_d_f_fixed")
+                year, week, _ = week_date.isocalendar()
+            with w_col2:
+                # Štai sugrąžintas Excel įkėlimas
+                uploaded_file = st.file_uploader("📥 Attach Excel to Verify Codes", type=['xlsx'], key="w_f_f_fixed")
+            
+            # Filtruojame savaitės duomenis
             weekly_data = df_reports[(df_reports['status'] == 'COMPLETED') & 
-                                    (df_reports['timestamp_dt'].dt.isocalendar().week == week) & 
-                                    (df_reports['timestamp_dt'].dt.isocalendar().year == year)].copy()
-            if not weekly_data.empty:
-                st.dataframe(weekly_data.style.apply(apply_custom_styling, axis=1), use_container_width=True)
+                                     (df_reports['timestamp_dt'].dt.isocalendar().week == week) & 
+                                     (df_reports['timestamp_dt'].dt.isocalendar().year == year)].copy()
+            
+            if weekly_data.empty:
+                st.warning("No data found for this week.")
+            else:
+                # Sugrąžiname palyginimo logiką
+                weekly_data['Found_in_Excel'] = False
+                
+                if uploaded_file:
+                    try:
+                        extra = pd.read_excel(uploaded_file)
+                        # Nuvalome tarpus nuo kodų, kad sutaptų 100%
+                        weekly_data['full_code'] = weekly_data['full_code'].astype(str).str.strip()
+                        
+                        if 'Full code' in extra.columns:
+                            extra['Full code'] = extra['Full code'].astype(str).str.strip()
+                            # Pažymime tuos, kurie rasti Excel faile
+                            weekly_data['Found_in_Excel'] = weekly_data['full_code'].isin(extra['Full code'].unique())
+                            st.success("Excel file linked successfully! Green rows = Match found.")
+                        else:
+                            st.error("Uploaded Excel must have a column named 'Full code'")
+                    except Exception as e:
+                        st.error(f"Error reading Excel: {e}")
+                
+                st.caption("🟢 Green: Excel Match | 🔵 Blue: Manual edit")
+                st.dataframe(weekly_data.style.apply(apply_custom_styling, axis=1), use_container_width=True, hide_index=True)
+                
                 wk_out = BytesIO()
                 with pd.ExcelWriter(wk_out, engine='xlsxwriter') as writer:
-                    weekly_data.drop(columns=['timestamp_dt'], errors='ignore').to_excel(writer, index=False)
-                st.download_button("📥 Download Weekly Excel", wk_out.getvalue(), f"Week_{week}.xlsx")
+                    # Išsaugome be pagalbinių stulpelių
+                    weekly_data.drop(columns=['timestamp_dt', 'Found_in_Excel'], errors='ignore').to_excel(writer, index=False)
+                st.download_button("📥 Download Weekly Excel", wk_out.getvalue(), f"Week_{week}.xlsx", key="dl_w_fixed")
+
