@@ -207,10 +207,9 @@ with tab2:
                                  (u_cust, u_samp, u_plate, u_in, u_out, abs(u_in-u_out), u_vol, new_code, sel_id))
                 st.success("Changes saved!")
                 st.rerun()
-                
-    with tab3:
-        st.title("📊 Report Management")
-        if not df_all.empty:
+ with tab3:
+    st.title("📊 Report Management")
+    if not df_all.empty:
         report_type = st.radio("Type:", ["Daily Report", "Weekly Report"], horizontal=True, key="rep_final_fixed")
         st.divider()
 
@@ -284,5 +283,5 @@ with tab2:
                 with pd.ExcelWriter(wk_out, engine='xlsxwriter') as writer:
                     # Išsaugome be pagalbinių stulpelių
                     weekly_data.drop(columns=['timestamp_dt', 'Found_in_Excel'], errors='ignore').to_excel(writer, index=False)
-                st.download_button("📥 Download Weekly Excel", wk_out.getvalue(), f"Week_{week}.xlsx", key="dl_w_fixed")
-
+                st.download_button("📥 Download Weekly Excel", wk_out.getvalue(), f"Week_{week}.xlsx", key="dl_w_fixed")               
+   
